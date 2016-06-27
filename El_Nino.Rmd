@@ -1,0 +1,130 @@
+---
+title: "Hunter Garfield ECON 522 Final"
+output: html_document
+---
+```{r,include=FALSE}
+library(astsa)
+library(forecast)
+library(tseries)
+library(TSA)
+library(stargazer)
+setwd("~/Documents/MSE/GSE522")
+```
+
+##Problem 1
+***
+```{r}
+d = read.csv("nino.csv")
+d = ts(d, start = 1950, frequency = 12)
+```
+
+##Problem 2
+***
+```{r,echo=FALSE}
+plot(d, main = "El Nino", ylab = "Water Temp (C)")
+```
+
+##Problem 3
+***
+Based on only the plot of the data above, it is hard to tell if a Box-Cox transformation would be useful. Box-Cox transformations are used to stabilize sample variance and make data sets more normally distributed. While we may not care so much about the normal distribution aspect (although we would if it also applied to our residuals), we can tell that there may be a little bit of heteroskedasticity in our model because the distances between peaks and valleys varies quite a bit over time. Therefore, a Box-Cox transformation may be helpful if we specify the value of lambda correctly.
+
+It may be a good idea to analyze this data differenced because, though it does look somewhat like white noise, it is easy to tell that the data has a mean (around 27 by the looks of the plot). It is not hard to imagine that the mean of ocean temperatures for the last 50 years would be dependent on time (global warming,etc.). Since we prefer to work with stationary data when using a lot of our fitting methods, de-meaning this data by differencing it would be helpful.
+
+##Problem 4
+***
+```{r,echo=FALSE}
+plot(d, main = "El Nino", ylab = "Water Temp (C)")
+lines(lowess(d, f = .1),lwd=2, col=2)
+```
+
+Based on the lowess smoother, it does appear that there is cyclicality in this data for periods longer than a year. It is not perfectly symmetric, but we can see a gradual sine wave that starts in 1950 and ends a couple of years before 1960. The wave breaks up a little bit after this, but we can still see upward and downward movements, and it looks like there is a similar wave between the periods just after 1980 and just before 1990.
+
+##Problem 5
+***
+```{r}
+trend = time(d)
+fit = lm(d~0+trend)
+detrend = d - fit$fitted.values
+per = periodogram(detrend, main="Periodogram of El Nino Data") #requires "TSA" package
+```
+
+We can tell by the periodogram output by the function that there are a few peak frequencies of interest. The main one clearly occurs just before the 0.1 frequency, and we are also interested in the ones that occur in between the tallest peak and zero. We can find out what these frequencies are using the code below:
+
+
+```{r}
+m1 = max(per$spec) #find highest value
+m1ind = which(per$spec==max(per$spec)) #find index of highest value
+f1 = per$freq[m1ind] #find corresponding frequency by index
+per$spec = per$spec[-m1ind] #get rid of first highest and search for second
+per$freq = per$freq[-m1ind]
+
+#rinse and repeat
+m2 = max(per$spec)
+m2ind = which(per$spec == max(per$spec))
+f2 = per$freq[m2ind]
+per$spec = per$spec[-m2ind] #get rid of second highest and search for third
+per$freq = per$freq[-m2ind]
+
+m3 = max(per$spec)
+m3ind = which(per$spec == max(per$spec))
+f3 = per$freq[m3ind]
+
+(cbind(f1,f2,f3))
+```
+
+The frequencies pulled out of the periodogram data are .08333, .02333, and .01667 (listed in order of peak height). These numbers tell us that there is a periodic signal of 1/f1 = 12, 1/f2 = 42.85, and 1/f3 = 60 months in the data. In other words, the data, though noisy, completes a full cycle after this many months (different cycles for each frequency). This is important because it tells us that we will probably need to adjust for seasonality when trying to model this data.
+
+##Problem 6
+***
+```{r,echo=FALSE}
+monthplot(d, main = "El Nino Ocean Temperatures by Month",ylab = "Ocean Temp (C)", xlab = "Month")
+```
+
+We can tell by the plot of ocean temperatures by month that there is definitely a little bit of seasonality in this data. While temperature seems to stay pretty steady from August through January, it is pretty clearthat ocean temperatures rise significantly starting in February, peak is March and April, and then decline again to a similar level as the later months by July. We can also see that there is a lot less variability in the data when the ocean temperatures are high (February-June) and that the variability picks up a lot in the later months. This may be because overall ocean temperatures have gotten hotter over the years, so we see a lot more change in temperature when the ocean is supposed to be cold and is actually warm (Sept - Dec), than we do when it is warm when we expect it to be.
+
+##Problem 7
+***
+```{r}
+dum = factor(cycle(d))
+mm = model.matrix(d~0+dum)
+fit = lm(d~0+mm)
+```
+```{r,echo=FALSE,results="asis"}
+stargazer(fit, type = "html",title = "Regression of Nino on Monthly dummies",covariate.labels = month.name,dep.var.labels = "Ocean Temp",style = "aer",single.row = T)
+```
+
+Fitting the data to a matrix of monthly dummy indicators shows us that there is definitely an association between ocean temperature and the month of the year. In fact, it appears that our monthly dummies explain 99% of the variability in ocean temperature (looking at the Rsquared). This will probably be a useful result to use when modeling the data down the line.
+
+##Problem 8
+***
+I started off this problem by only fitting the AR component of the arima model until I found one that worked best. An AR(3) was a pretty good step up from one and two. Once I created an AR(4), however, I realized that the AIC barely decreased and that the fourth AR term wasn't significant, so I stuck with an AR(3)
+```{r}
+arima(d, order = c(3,0,0)) 
+arima(d, order = c(4,0,0))
+```
+
+Next, I started testing how many MA terms to add. The ARMA(3,2) was a big step up from ARMA(3,1), but ARMA(3,3) didn't add much and, again, didn't have a significant coefficient, so I went with ARMA(3,2):
+```{r}
+arima(d, order = c(3,0,2)) #Moving on with this
+arima(d, order = c(3,0,3))
+```
+
+Next I looked at the integrated term. Usually we don't set a value of d greater than one, but I also tried using two to see if it would add any more information. I found that adding this term actually decreased the significance of some of my estimates and increased the AIC of the model, so I decided not to include an integrated term at all.
+
+Adding monthly dummies as an external regressor probably provided the biggest boost to the usefulness of this model. 
+```{r}
+arima(d, order = c(3,0,2), xreg = mm,include.mean = F)
+```
+All of the monthly dummies are significant along with the ARMA terms, and the AIC dropped from 559 to 340. This tells us that the specifications of this model are much better than the previous ones that we have looked at.
+
+Finally, I included seasonal terms in my arima model. Basically every combination of seasonal terms that I tried made the model worse. The coefficients on the terms were never significant and the AIC always increased. The most helpful specification I could add was a seasonal AR(1), but even this increased the AIC a little bit and still wasn't significant.
+```{r}
+arima(d, order = c(3,0,2), seasonal = list(order = c(1,0,0), period=12), xreg = mm,include.mean = F)
+```
+
+Based on these results, it appears that an ARIMA(3,0,2) with seasonal dummies as external regressors is the best model for this data. To test this, we can look at some of the output from the sarima() command:
+```{r,tidy=TRUE}
+sar = sarima(d,3,0,2,0,0,0,0,xreg = mm[,-1],details = FALSE)
+```
+
+The top plot of the residuals looks good, they appeared to be centered at zero and without a lot of heteroskedasticity (although there is some in the periods right before 1990 and 2000). The ACF plot also looks good, there only appear to be two small lags at which the residuals are correlated but even these are borderline, so we know that the errors aren't correlated with each other for the most part. The normal Q-Q plot also looks great, the fact that almost every point lies on the straight line indicates that our assumption about the normal distribution of the errors is probably correct, save for a few outliers at the tails. The Ljung-Box plot is a little bit worrisome, we can see from the points below the dotted blue line that at all the lags except 12, 13, and 14, we may have residuals that are not independent. While this may be an issue, I was unable to get anything significantly different from changing the model (I tried taking out the dummies, adding different types of seasonality, and changing the ARMA specifications). Therefore, it may be an issue that we have to deal with and keep in mind when forecasting using this model.
